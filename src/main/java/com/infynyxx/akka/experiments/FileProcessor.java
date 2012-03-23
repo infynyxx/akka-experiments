@@ -37,10 +37,13 @@ public class FileProcessor {
             final BufferedReader bufferedReader = new BufferedReader(reader);
             String line = null;
             while ((line = bufferedReader.readLine()) != null) {
-                // do something here
-                count++;
+                final LogDeserializer logDeserializer = gson.fromJson(line, LogDeserializer.class);
+                if (logDeserializer.isValid()) {
+                    count++;
+                }
+
                 if (count > 0 && count % 50 == 0) {
-                    logger.info(String.format("Thread Count: %d", Thread.activeCount()));
+                    logger.log(Level.INFO, String.format("Number of lines processed for file %s: %d", file.getName(), count));
                 }
             }
             bufferedReader.close();
