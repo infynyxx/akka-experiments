@@ -1,10 +1,9 @@
 package com.infynyxx.akka.experiments;
 
-import akka.actor.*;
-import akka.routing.RoundRobinRouter;
-import akka.util.Duration;
+import org.apache.pekko.actor.*;
 
 import java.io.File;
+import java.time.Duration;
 import java.util.Collections;
 import java.util.List;
 import java.util.concurrent.TimeUnit;
@@ -24,18 +23,13 @@ public class LogProcessor {
         // create akka actor system
         ActorSystem system = ActorSystem.create();
 
-        final ActorRef listener  = system.actorOf(new Props(Listener.class), "Listener");
+        final ActorRef listener  = system.actorOf(Props.create(Listener.class), "Listener");
 
         // create the master
-        ActorRef master = system.actorOf(new Props(new UntypedActorFactory() {
-            @Override
-            public Actor create() {
-                return new Master(Runtime.getRuntime().availableProcessors(), files, listener);
-            }
-        }), "master");
+        ActorRef master = system.actorOf(Props.create(Master.class, files, listener), "master");
 
         // start the calculation
-        master.tell(new Process());
+        master.tell(new Process(), ActorRef.noSender());
 
         return true;
     }
@@ -44,10 +38,9 @@ public class LogProcessor {
 
     }
 
-    public static class Master extends UntypedActor {
+    public static class Master extends UntypedAbstractActor {
 
         private final ActorRef listener;
-        private final int numberOfWorkers;
         private final List<File> files;
 
         private final ActorRef workerRouter;
@@ -57,12 +50,11 @@ public class LogProcessor {
 
         private int linesCount = 0;
 
-        public Master(final int numberOfWorkers, final List<File> files, final ActorRef listener) {
+        public Master(final List<File> files, final ActorRef listener) {
             this.listener = listener;
-            this.numberOfWorkers = numberOfWorkers;
             this.files = files;
 
-            this.workerRouter = getContext().actorOf(new Props(Worker.class).withRouter(new RoundRobinRouter(numberOfWorkers)), "workerRouter");
+            this.workerRouter = getContext().actorOf(Props.create(Worker.class));
         }
 
         @Override
@@ -77,7 +69,7 @@ public class LogProcessor {
                 linesCount += result.getLinesCount();
 
                 if (numberOfResults == files.size()) {
-                    Duration duration = Duration.create(System.currentTimeMillis() - start, TimeUnit.MILLISECONDS);
+                    Duration duration = Duration.ofMillis(System.currentTimeMillis() - start);
                     listener.tell(new FileProcessedAproximation(files.size(), linesCount, duration), getSelf());
                     getContext().stop(getSelf());
                 }
@@ -87,15 +79,15 @@ public class LogProcessor {
         }
     }
 
-    public static class Worker extends UntypedActor {
+    public static class Worker extends UntypedAbstractActor {
 
         @Override
         public void onReceive(Object message) throws Exception {
             if (message instanceof Work) {
                 Work work = (Work) message;
                 FileProcessorResult fileProcessorResult = analyze(work.getFile());
-                Duration duration = Duration.create(System.currentTimeMillis() - fileProcessorResult.getStarted(), TimeUnit.MILLISECONDS);
-                getSender().tell(new Result(fileProcessorResult.getLinesProcessed(), duration));
+                Duration duration = Duration.ofMillis(System.currentTimeMillis() - fileProcessorResult.getStarted());
+                getSender().tell(new Result(fileProcessorResult.getLinesProcessed(), duration), getSelf());
             } else {
                 unhandled(message);
             }
@@ -168,14 +160,14 @@ public class LogProcessor {
         }
     }
 
-    public static class Listener extends UntypedActor {
+    public static class Listener extends UntypedAbstractActor {
 
         @Override
         public void onReceive(Object message) throws Exception {
             if (message instanceof FileProcessedAproximation) {
                 FileProcessedAproximation aproximation = (FileProcessedAproximation) message;
                 System.out.println(String.format("Files Processed: %d\nLines Count: %d \nDuration: %s", aproximation.getFilesCount(), aproximation.getLinesCount(), aproximation.getDuration()));
-                getContext().system().shutdown();
+                getContext().system().terminate();
             } else {
                 unhandled(message);
             }
